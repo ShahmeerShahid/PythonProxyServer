@@ -1,5 +1,6 @@
 import socket
-import sys, pprint
+import sys, pprint, _thread
+
 
 def http_req_fixer_v2(data):
     data = data.decode('utf-8')
@@ -98,15 +99,17 @@ def start_proxy(connection, client_address):
     forward_sock.connect((webserver, 80))
     encoded_req = new_req.encode()
     forward_sock.send(encoded_req)            
-
+	
+    response = b''
     while True:
-        reply = forward_sock.recv(16)
+        reply = forward_sock.recv(1024)
 
         if len(reply) > 0:
-            connection.send(reply)
+            # with open('out.txt' 'w') as f:
+            response += reply
         else:
             break
-    
+    connection.sendall(response)
     forward_sock.close()
     connection.close()
 
@@ -138,7 +141,8 @@ if __name__ == "__main__":
         # Wait for a connection
         print('waiting for a connection')
         connection, client_address = client_sock.accept()
-        start_proxy(connection, client_address)
+
+        _thread.start_new_thread(start_proxy,(connection, client_address))
 
         # read_socs, write_socks, done_socks = select.select(in_socks, out_socks, in_socks)
         
