@@ -137,6 +137,7 @@ if __name__ == "__main__":
 	# in_socks, out_socks = [server_sock], []
 
 	dest_client_dict = {} # dest_socket: (client_socket, URL e.g. 'www.example.com/index.html')
+	dest_response_dict = {} # client_sock
 	cache = [] # urls
 	input_socks = [server_sock]
 	client_socks = []
@@ -196,6 +197,7 @@ if __name__ == "__main__":
 					except TimeoutError:
 						continue
 					dest_client_dict[forward_sock] = (s, url)
+					dest_response_dict[forward_sock] = b""
 					input_socks.append(forward_sock)
 					num_inputs += 1
 					encoded_req = new_req.encode()
@@ -210,6 +212,8 @@ if __name__ == "__main__":
 					dest_client_dict.pop(s)
 					continue
 				if len(reply) == 0:
+					client_sock, url = dest_client_dict[s]
+					client_sock.sendall(dest_response_dict[s])
 					input_socks.remove(s)
 					s.close()
 					num_inputs -= 1
