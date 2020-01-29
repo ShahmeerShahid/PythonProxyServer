@@ -1,5 +1,5 @@
 import socket
-import sys, pprint, select, os
+import sys, pprint, select, os, time
 
 
 def http_req_fixer_v2(data):
@@ -55,6 +55,19 @@ def read_from_cache(url):
 		return b"" # file doesn't exist
 	return reply
 
+def time_diff(t1, t2):
+	return t2-t1
+
+def cache_valid(cache_timer, url):
+	url = url.replace("/", ",")
+	try:
+		modification_time = os.path.getmtime(url)
+	except OSError:
+		return False # file DNE
+	
+	return cache_timer > time_diff(modification_time, time.time())
+
+
 
 def start_proxy(connection, client_address):
 	print('\nConnection from', client_address)
@@ -91,6 +104,8 @@ def start_proxy(connection, client_address):
 
 
 if __name__ == "__main__":
+	# parse cache expiry timer
+	cache_timer = sys.argv[1]
 
 	# Create a TCP/IP socket
 	server_sock = socket.socket()
@@ -158,7 +173,7 @@ if __name__ == "__main__":
 				new_req, webserver, url = http_req_fixer_v2(data)
 				# check if url is in cache
 				reply = read_from_cache(url)
-				if reply != b"":
+				if reply != b"" and cache_valid(cache_timer, url):
 					print(f"{url} was in cache")
 					# in cache, send back cached web page
 					s.sendall(reply)
@@ -166,7 +181,7 @@ if __name__ == "__main__":
 					client_socks.remove(s)
 					s.close()
 				else:
-					# not in cache
+					# not in cache/entry expired
 					print(f"{url} was not in cache")
 					if webserver.split("/")[-1] == "favicon.ico":
 						continue # Skip favicon requests
