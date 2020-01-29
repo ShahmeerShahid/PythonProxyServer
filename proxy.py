@@ -69,7 +69,7 @@ def cache_valid(cache_timer, url):
 	except OSError:
 		return False # file DNE
 	
-	if cache_timer <= (time.time() - modification_time):
+	if cache_timer*1000 <= (time.time() - modification_time):
 		os.remove(url)
 		return False
 	return True
@@ -119,7 +119,7 @@ if __name__ == "__main__":
 
 	# Bind the socket to the port
 	error_count = 0
-	port = 8080
+	port = 8888
 	while True:
 		try:
 			server_sock.bind(('127.0.0.1', port))
