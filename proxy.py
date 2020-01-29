@@ -1,5 +1,5 @@
 import socket
-import sys, pprint, select
+import sys, pprint, select, os
 
 
 def http_req_fixer_v2(data):
@@ -37,7 +37,23 @@ def http_req_fixer_v2(data):
 			fixed_req = fixed_req + '\r\n'
 	#print('FIXED REQ:\n', fixed_req)
 
-	return fixed_req, host
+	return fixed_req, host, url
+
+def write_to_cache(reply, url):
+	url = url.replace("/", ",")
+	with open(f"{url}.txt", "ab") as o:
+		o.write(reply)
+		# o.write(b"<html><body><h1>U fucking jabroni</h1></body></html>")
+	return len(reply)
+
+def read_from_cache(url):
+	url = url.replace("/", ",")
+	try:
+		with open(f"{url}.txt", "rb") as o:
+			reply = o.read()
+	except IOError as e:
+		return b"" # file doesn't exist
+	return reply
 
 
 def start_proxy(connection, client_address):
@@ -73,6 +89,7 @@ def start_proxy(connection, client_address):
 	forward_sock.close()
 	connection.close()
 
+
 if __name__ == "__main__":
 
 	# Create a TCP/IP socket
@@ -97,7 +114,8 @@ if __name__ == "__main__":
 
 	# in_socks, out_socks = [server_sock], []
 
-	dest_client_dict = {}
+	dest_client_dict = {} # dest_socket: (client_socket, URL e.g. 'www.example.com/index.html')
+	cache = [] # urls
 	input_socks = [server_sock]
 	client_socks = []
 	num_clients, num_inputs = 0, 0
@@ -107,7 +125,7 @@ if __name__ == "__main__":
 		# connection, client_address = server_sock.accept()
 		# start_proxy(connection, client_address)
 
-		read_socks, _, _ = select.select(input_socks, [], input_socks)
+		read_socks, _, error_socks = select.select(input_socks, [], input_socks)
 
 		for s in read_socks:
 			if s is server_sock:
@@ -136,22 +154,33 @@ if __name__ == "__main__":
 					num_inputs -= 1
 					num_clients -= 1
 					continue
-				new_req, webserver = http_req_fixer_v2(data)
-				if webserver.split("/")[-1] == "favicon.ico":
-					# print(f"Server was favicon, skipping")
-					continue
-				forward_sock = socket.socket()
-				# forward_sock.settimeout(20)
-				try:
-					forward_sock.connect((webserver, 80))
-				except TimeoutError:
-					continue
-				dest_client_dict[forward_sock] = s
-				input_socks.append(forward_sock)
-				num_inputs += 1
-				encoded_req = new_req.encode()
-				forward_sock.sendall(encoded_req)
-			
+				
+				new_req, webserver, url = http_req_fixer_v2(data)
+				# check if url is in cache
+				reply = read_from_cache(url)
+				if reply != b"":
+					print(f"{url} was in cache")
+					# in cache, send back cached web page
+					s.sendall(reply)
+					input_socks.remove(s)
+					client_socks.remove(s)
+					s.close()
+				else:
+					# not in cache
+					print(f"{url} was not in cache")
+					if webserver.split("/")[-1] == "favicon.ico":
+						continue # Skip favicon requests
+					forward_sock = socket.socket()
+					try:
+						forward_sock.connect((webserver, 80))
+					except TimeoutError:
+						continue
+					dest_client_dict[forward_sock] = (s, url)
+					input_socks.append(forward_sock)
+					num_inputs += 1
+					encoded_req = new_req.encode()
+					forward_sock.sendall(encoded_req)
+
 			else: # must be a response from a server
 				try:
 					reply = s.recv(8192)
@@ -160,12 +189,22 @@ if __name__ == "__main__":
 					num_inputs -= 1
 					dest_client_dict.pop(s)
 					continue
-				client_sock = dest_client_dict[s]
 				if len(reply) == 0:
 					input_socks.remove(s)
 					s.close()
 					num_inputs -= 1
 					dest_client_dict.pop(s)
 					continue
+
+				client_sock, url = dest_client_dict[s]
+				cache.append(url)
+				write_to_cache(reply, url) 
 				client_sock.sendall(reply)
-		print(str(num_clients)+" unique clients, "+str(num_inputs)+" total sockets.", end='\r')
+	
+		for e in error_socks:
+			try:
+				e.shutdown()
+			except ConnectionResetError:
+				continue
+	
+	print(str(num_clients)+" unique clients, "+str(num_inputs)+" total sockets.", end='\r')
