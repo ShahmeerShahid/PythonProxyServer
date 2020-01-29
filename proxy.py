@@ -43,20 +43,24 @@ def write_to_cache(reply, url):
 	url = url.replace("/", ",")
 	with open(f"{url}.txt", "ab") as o:
 		o.write(reply)
-		# o.write(b"<html><body><h1>U fucking jabroni</h1></body></html>")
+	print(f"Wrote {url} to cache")
 	return len(reply)
 
 def read_from_cache(url):
 	url = url.replace("/", ",")
 	try:
 		with open(f"{url}.txt", "rb") as o:
-			reply = o.read()
+			if cache_valid(cache_timer, url):
+				reply = o.read()
+			else:
+				print(f"Found {url} in cache but was expired, deleting")
+				return b""
 	except IOError as e:
+		print(f"{url} not found in cache")
 		return b"" # file doesn't exist
+	print(f"Found {url} in cache")
 	return reply
 
-def time_diff(t1, t2):
-	return t2-t1
 
 def cache_valid(cache_timer, url):
 	url = url.replace("/", ",")
@@ -65,7 +69,10 @@ def cache_valid(cache_timer, url):
 	except OSError:
 		return False # file DNE
 	
-	return cache_timer > time_diff(modification_time, time.time())
+	if cache_timer <= (time.time() - modification_time):
+		os.remove(url)
+		return False
+	return True
 
 
 
@@ -112,7 +119,7 @@ if __name__ == "__main__":
 
 	# Bind the socket to the port
 	error_count = 0
-	port = 8888
+	port = 8080
 	while True:
 		try:
 			server_sock.bind(('127.0.0.1', port))
@@ -173,8 +180,7 @@ if __name__ == "__main__":
 				new_req, webserver, url = http_req_fixer_v2(data)
 				# check if url is in cache
 				reply = read_from_cache(url)
-				if reply != b"" and cache_valid(cache_timer, url):
-					print(f"{url} was in cache")
+				if reply != b"":
 					# in cache, send back cached web page
 					s.sendall(reply)
 					input_socks.remove(s)
@@ -182,7 +188,6 @@ if __name__ == "__main__":
 					s.close()
 				else:
 					# not in cache/entry expired
-					print(f"{url} was not in cache")
 					if webserver.split("/")[-1] == "favicon.ico":
 						continue # Skip favicon requests
 					forward_sock = socket.socket()
