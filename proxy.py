@@ -29,19 +29,34 @@ def http_req_fixer_v2(data):
 		elif 'Accept-Encoding' in data[line_index]:
 			#encoding
 			fixed_req = fixed_req + 'Accept-Encoding: utf-8'
+		elif 'Connection' in data[line_index]:
+			fixed_req = fixed_req + 'Connection: close'
 		else:
 			#if line doesn't need to be changed, add original
 			fixed_req = fixed_req + data[line_index]
 		if line_index != 15:
 			#to not add a third carriage return at the end of the request
 			fixed_req = fixed_req + '\r\n'
-	#print('FIXED REQ:\n', fixed_req)
+	print('FIXED REQ:\n', fixed_req)
 
 	return fixed_req, host, url
 
+def inject_html(injection, html):
+	# injects injection into <body> in HTML
+	# HTML is encoded
+	text = [b'<p style="z-index:9999; position:fixed; top:20px; left:20px; width:200px;height:100px; background-color:yellow; padding:10px; font-weight:bold;">', b'</p>']
+	
+	if b"<html" not in html:
+		return html
+
+	l = html.split(b"<body", 1)
+	x = l[1].split(b">", 1)
+	return l[0] + b"<body" + x[0] + b">" + text[0] + injection.encode() + text[1] + x[1]
+
+
 def write_to_cache(reply, url):
 	url = url.replace("/", ",")
-	with open(f"{url}.cache", "ab") as o:
+	with open(f"{url}", "ab") as o:
 		# inject code here (cached version)
 		o.write(reply)
 	print(f"Wrote {url} to cache")
@@ -50,14 +65,14 @@ def write_to_cache(reply, url):
 def read_from_cache(url):
 	url = url.replace("/", ",")
 	try:
-		with open(f"{url}.cache", "rb") as o:
+		with open(f"{url}", "rb") as o:
 			if cache_valid(cache_timer, url):
 				reply = o.read()
 			else:
 				print(f"Found {url} in cache but was expired, deleting")
 				return b""
 	except IOError as e:
-		print(e)
+		print(f"{url} not found in cache")
 		return b"" # file doesn't exist
 	print(f"Found {url} in cache")
 	return reply
@@ -65,10 +80,7 @@ def read_from_cache(url):
 
 def cache_valid(cache_timer, url):
 	url = url.replace("/", ",")
-	
 	modification_time = os.path.getmtime(url)
-	print(f"Cache timer: {cache_timer}, modification time: {modification_time}")
-
 	if cache_timer <= (time.time() - modification_time):
 		os.remove(url)
 		return False
@@ -113,7 +125,6 @@ def start_proxy(connection, client_address):
 if __name__ == "__main__":
 	# parse cache expiry timer
 	cache_timer = int(sys.argv[1])
-
 	# Create a TCP/IP socket
 	server_sock = socket.socket()
 
@@ -127,6 +138,7 @@ if __name__ == "__main__":
 			break
 		except OSError:
 			error_count += 1
+			port += 1
 			if error_count % 1000000 == 0:
 				print("OSError")
 			continue
@@ -216,8 +228,11 @@ if __name__ == "__main__":
 					# inject code here (fresh page)
 
 					try: 
-						client_sock.sendall(dest_response_dict[s])
-						write_to_cache(dest_response_dict[s], url)
+						time_stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+						fresh_msg = f"FRESH VERSION AT: {time_stamp}"
+						cache_msg = f"CACHED VERSION AS OF: {time_stamp}"
+						client_sock.sendall(inject_html(fresh_msg, dest_response_dict[s]))
+						write_to_cache(inject_html(cache_msg, dest_response_dict[s]), url)
 					except OSError as e:
 						print("Tried writing to a client that already disconnected")
 					finally:
