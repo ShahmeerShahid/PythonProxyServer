@@ -41,7 +41,7 @@ def http_req_fixer_v2(data):
 
 def write_to_cache(reply, url):
 	url = url.replace("/", ",")
-	with open(f"{url}.txt", "ab") as o:
+	with open(f"{url}.cache", "ab") as o:
 		# inject code here (cached version)
 		o.write(reply)
 	print(f"Wrote {url} to cache")
@@ -50,14 +50,14 @@ def write_to_cache(reply, url):
 def read_from_cache(url):
 	url = url.replace("/", ",")
 	try:
-		with open(f"{url}.txt", "rb") as o:
+		with open(f"{url}.cache", "rb") as o:
 			if cache_valid(cache_timer, url):
 				reply = o.read()
 			else:
 				print(f"Found {url} in cache but was expired, deleting")
 				return b""
 	except IOError as e:
-		print(f"{url} not found in cache")
+		print(e)
 		return b"" # file doesn't exist
 	print(f"Found {url} in cache")
 	return reply
@@ -67,9 +67,9 @@ def cache_valid(cache_timer, url):
 	url = url.replace("/", ",")
 	
 	modification_time = os.path.getmtime(url)
-	
+	print(f"Cache timer: {cache_timer}, modification time: {modification_time}")
+
 	if cache_timer <= (time.time() - modification_time):
-		print(f"Cache timer: {cache_timer}, modification time: {modification_time}")
 		os.remove(url)
 		return False
 	return True
@@ -112,7 +112,7 @@ def start_proxy(connection, client_address):
 
 if __name__ == "__main__":
 	# parse cache expiry timer
-	cache_timer = sys.argv[1]
+	cache_timer = int(sys.argv[1])
 
 	# Create a TCP/IP socket
 	server_sock = socket.socket()
