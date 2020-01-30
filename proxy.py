@@ -42,6 +42,7 @@ def http_req_fixer_v2(data):
 def write_to_cache(reply, url):
 	url = url.replace("/", ",")
 	with open(f"{url}.txt", "ab") as o:
+		# inject code here (cached version)
 		o.write(reply)
 	print(f"Wrote {url} to cache")
 	return len(reply)
@@ -64,12 +65,11 @@ def read_from_cache(url):
 
 def cache_valid(cache_timer, url):
 	url = url.replace("/", ",")
-	try:
-		modification_time = os.path.getmtime(url)
-	except OSError:
-		return False # file DNE
 	
-	if cache_timer*1000 <= (time.time() - modification_time):
+	modification_time = os.path.getmtime(url)
+	
+	if cache_timer <= (time.time() - modification_time):
+		print(f"Cache timer: {cache_timer}, modification time: {modification_time}")
 		os.remove(url)
 		return False
 	return True
@@ -138,7 +138,6 @@ if __name__ == "__main__":
 
 	dest_client_dict = {} # dest_socket: (client_socket, URL e.g. 'www.example.com/index.html')
 	dest_response_dict = {} # client_sock
-	cache = [] # urls
 	input_socks = [server_sock]
 	client_socks = []
 	num_clients, num_inputs = 0, 0
@@ -171,6 +170,7 @@ if __name__ == "__main__":
 					num_clients -= 1
 					continue
 				if len(data) == 0:
+					print("Closing client socket")
 					s.close()
 					client_socks.remove(s)
 					input_socks.remove(s)
@@ -213,17 +213,24 @@ if __name__ == "__main__":
 					continue
 				if len(reply) == 0:
 					client_sock, url = dest_client_dict[s]
-					client_sock.sendall(dest_response_dict[s])
-					input_socks.remove(s)
-					s.close()
-					num_inputs -= 1
-					dest_client_dict.pop(s)
-					continue
+					# inject code here (fresh page)
 
-				client_sock, url = dest_client_dict[s]
-				cache.append(url)
-				write_to_cache(reply, url) 
-				client_sock.sendall(reply)
+					try: 
+						client_sock.sendall(dest_response_dict[s])
+						write_to_cache(dest_response_dict[s], url)
+					except OSError as e:
+						print("Tried writing to a client that already disconnected")
+					finally:
+						input_socks.remove(s)
+						s.close()
+						num_inputs -= 1
+						dest_response_dict.pop(s)
+						dest_client_dict.pop(s)
+					continue
+					
+
+				
+				dest_response_dict[s] += reply
 	
 		for e in error_socks:
 			try:
