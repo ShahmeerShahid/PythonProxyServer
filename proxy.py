@@ -37,7 +37,7 @@ def http_req_fixer_v2(data):
 		if line_index != 15:
 			#to not add a third carriage return at the end of the request
 			fixed_req = fixed_req + '\r\n'
-	print('FIXED REQ:\n', fixed_req)
+	#print('FIXED REQ:\n', fixed_req)
 
 	return fixed_req, host, url
 
@@ -49,7 +49,19 @@ def inject_html(injection, html):
 	if b"<html" not in html:
 		return html
 
-	l = html.split(b"<body", 1)
+	injection_length = len(text[0]) + len(injection.encode()) + len(text[1])
+	injected_html = b""
+	html = html.split(b"\r\n")
+	for i in html:
+		if b"Content-Length: " in i:
+			x = i.split(b"Content-Length: ")
+			content_length = int(x[1])
+			new_length = content_length + injection_length
+			injected_html += b"Content-Length: " + str(new_length).encode() + b"\r\n"
+		else:
+			injected_html += i + b"\r\n"
+
+	l = injected_html.split(b"<body", 1)
 	x = l[1].split(b">", 1)
 	return l[0] + b"<body" + x[0] + b">" + text[0] + injection.encode() + text[1] + x[1]
 
