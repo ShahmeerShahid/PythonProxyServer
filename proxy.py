@@ -1,8 +1,8 @@
 import socket
-import sys, pprint, select, os, time
+import sys, select, os, time
 
 
-def http_req_fixer_v2(data):
+def http_req_fixer(data):
 	data = data.decode('utf-8')
 	space_split_data = data.split(' ')
 	req_type = space_split_data[0]
@@ -15,6 +15,8 @@ def http_req_fixer_v2(data):
 		files = files + '/' + location[f]
 	if files == '':
 		files = url
+	# if files == "/":
+	# 	files = " "
 	
 	data = data.splitlines()
 	fixed_req = ''
@@ -65,31 +67,31 @@ def inject_html(injection, html):
 
 
 def write_to_cache(reply, url):
-	url = url.replace("/", ",")
-	with open(f"{url}", "ab") as o:
+	url = url.replace("/", " ")
+	with open(f"{url}", "wb") as o:
 		o.write(reply)
-	print(f"Wrote {url} to cache")
+	# Wrote URL to cache
 	return len(reply)
 
 def read_from_cache(url):
-	url = url.replace("/", ",")
+	url = url.replace("/", " ")
 	try:
 		with open(f"{url}", "rb") as o:
 			if cache_valid(cache_timer, url):
 				reply = o.read()
 			else:
-				print(f"Found {url} in cache but was expired, deleting")
+				# Found URL in cache, but was expired, deleting
 				return b""
-	except IOError as e:
-		print(f"{url} not found in cache")
+	except IOError:
+		# URL not found in cache
 		return b"" # file doesn't exist
 
-	print(f"Found {url} in cache")
+	# Found URL in cache
 	return reply
 
 
 def cache_valid(cache_timer, url):
-	url = url.replace("/", ",")
+	url = url.replace("/", " ")
 	modification_time = os.path.getmtime(url)
 	if cache_timer <= (time.time() - modification_time):
 		os.remove(url)
@@ -101,28 +103,17 @@ def start_proxy(cache_timer):
 	server_sock = socket.socket()
 
 	# Bind the socket to the port
-	error_count = 0
 	port = 8888
-	while True:
-		try:
-			server_sock.bind(('127.0.0.1', port))
-			print("Made socket on port", port)
-			break
-		except OSError:
-			error_count += 1
-			port += 1
-			if error_count % 1000000 == 0:
-				print("OSError")
-			continue
+	server_sock.bind(('127.0.0.1', port))
+	print("Made socket on port", port)
 
 	# Listen for incoming connections
 	server_sock.listen()
 
 	dest_client_dict = {} # dest_socket: (client_socket, URL e.g. 'www.example.com/index.html')
-	dest_response_dict = {} # client_sock
+	dest_response_dict = {} # allows us to collect the response from the server to inject HTML
 	input_socks = [server_sock]
 	client_socks = []
-	num_clients, num_inputs = 0, 0
 
 	while True:
 		# Wait for a connection
@@ -132,32 +123,27 @@ def start_proxy(cache_timer):
 		for s in read_socks:
 			if s is server_sock:
 				new_client, _ = s.accept()
-				new_client.settimeout(20)
+				new_client.settimeout(60)
 				input_socks.append(new_client)
 				client_socks.append(new_client)
-				num_clients += 1
-				num_inputs += 1
 
 			elif s in client_socks:
 				# HTTP request came in from client
 				try:
 					data = s.recv(8192)
 				except ConnectionResetError:
+					# socket has been closed
 					client_socks.remove(s)
 					input_socks.remove(s)
-					num_inputs -= 1
-					num_clients -= 1
 					continue
 				if len(data) == 0:
-					print("Closing client socket")
+					# no more data from client
 					s.close()
 					client_socks.remove(s)
 					input_socks.remove(s)
-					num_inputs -= 1
-					num_clients -= 1
 					continue
 				
-				new_req, webserver, url = http_req_fixer_v2(data)
+				new_req, webserver, url = http_req_fixer(data)
 
 				# check if url is in cache
 				reply = read_from_cache(url)
@@ -179,7 +165,6 @@ def start_proxy(cache_timer):
 					dest_client_dict[forward_sock] = (s, url)
 					dest_response_dict[forward_sock] = b""
 					input_socks.append(forward_sock)
-					num_inputs += 1
 					encoded_req = new_req.encode()
 					forward_sock.sendall(encoded_req)
 
@@ -188,18 +173,16 @@ def start_proxy(cache_timer):
 					reply = s.recv(8192)
 				except ConnectionResetError:
 					input_socks.remove(s)
-					num_inputs -= 1
 					dest_client_dict.pop(s)
 					continue
 				if len(reply) == 0:
+					# no more data coming in from server, we can send back collected response to client
 					client_sock, url = dest_client_dict[s]
-					# inject code here (fresh page)
-
+					# inject HTML to add the yellow box
 					try: 
 						time_stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
 						fresh_msg = f"FRESH VERSION AT: {time_stamp}"
 						cache_msg = f"CACHED VERSION AS OF: {time_stamp}"
-
 						client_sock.sendall(inject_html(fresh_msg, dest_response_dict[s]))
 						write_to_cache(inject_html(cache_msg, dest_response_dict[s]), url)
 
@@ -209,10 +192,8 @@ def start_proxy(cache_timer):
 					finally:
 						input_socks.remove(s)
 						s.close()
-						num_inputs -= 1
 						dest_response_dict.pop(s)
 						dest_client_dict.pop(s)
-
 					continue
 				
 				dest_response_dict[s] += reply
@@ -228,4 +209,3 @@ if __name__ == "__main__":
 	# parse cache expiry timer
 	cache_timer = int(sys.argv[1])
 	start_proxy(cache_timer)
-	
