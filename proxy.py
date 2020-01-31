@@ -6,17 +6,16 @@ def http_req_fixer_v2(data):
 	data = data.decode('utf-8')
 	space_split_data = data.split(' ')
 	req_type = space_split_data[0]
-	# print(f"data.split: {space_split_data}")
 	url = space_split_data[1]
 	host  = url.split('/')[1]
 	
 	files = ''
 	location = url.split('/')
-	for f in range(2,len(location)): #to grab just the path of the files requested  from the server 
+	for f in range(2,len(location)): #to grab just the path of the files requested from the server 
 		files = files + '/' + location[f]
 	if files == '':
 		files = url
-
+	
 	data = data.splitlines()
 	fixed_req = ''
 	for line_index in range(len(data)):
@@ -37,7 +36,6 @@ def http_req_fixer_v2(data):
 		if line_index != 15:
 			#to not add a third carriage return at the end of the request
 			fixed_req = fixed_req + '\r\n'
-	#print('FIXED REQ:\n', fixed_req)
 
 	return fixed_req, host, url
 
@@ -52,7 +50,7 @@ def inject_html(injection, html):
 	injection_length = len(text[0]) + len(injection.encode()) + len(text[1])
 	injected_html = b""
 	html = html.split(b"\r\n")
-	for i in html:
+	for i in html: #adjust content-length header to resolve truncation 
 		if b"Content-Length: " in i:
 			x = i.split(b"Content-Length: ")
 			content_length = int(x[1])
@@ -69,7 +67,6 @@ def inject_html(injection, html):
 def write_to_cache(reply, url):
 	url = url.replace("/", ",")
 	with open(f"{url}", "ab") as o:
-		# inject code here (cached version)
 		o.write(reply)
 	print(f"Wrote {url} to cache")
 	return len(reply)
@@ -86,6 +83,7 @@ def read_from_cache(url):
 	except IOError as e:
 		print(f"{url} not found in cache")
 		return b"" # file doesn't exist
+
 	print(f"Found {url} in cache")
 	return reply
 
@@ -98,45 +96,7 @@ def cache_valid(cache_timer, url):
 		return False
 	return True
 
-
-
-def start_proxy(connection, client_address):
-	print('\nConnection from', client_address)
-	data = connection.recv(8192)
-	if len(data) == 0:
-		return
-	new_req, webserver = http_req_fixer_v2(data)
-	if webserver.split("/")[-1] == "favicon.ico":
-		print(f"Server was favicon, skipping")
-		return
-	print(f"new_req: \n{new_req}")
-
-
-	forward_sock = socket.socket()
-	forward_sock.connect((webserver, 80))
-	encoded_req = new_req.encode()
-	forward_sock.send(encoded_req)            
-	
-	response = b''
-	while True:
-		reply = forward_sock.recv(64000) # 64k buffer size
-
-		if len(reply) > 0:
-			# with open('out.txt' 'w') as f:
-			print("Received reply of length " + str(len(reply)))
-			print(str(reply))
-			# response += reply
-			connection.sendall(reply)
-		else:
-			break
-	# connection.sendall(response)
-	forward_sock.close()
-	connection.close()
-
-
-if __name__ == "__main__":
-	# parse cache expiry timer
-	cache_timer = int(sys.argv[1])
+def start_proxy(cache_timer):
 	# Create a TCP/IP socket
 	server_sock = socket.socket()
 
@@ -158,8 +118,6 @@ if __name__ == "__main__":
 	# Listen for incoming connections
 	server_sock.listen()
 
-	# in_socks, out_socks = [server_sock], []
-
 	dest_client_dict = {} # dest_socket: (client_socket, URL e.g. 'www.example.com/index.html')
 	dest_response_dict = {} # client_sock
 	input_socks = [server_sock]
@@ -168,8 +126,6 @@ if __name__ == "__main__":
 
 	while True:
 		# Wait for a connection
-		# connection, client_address = server_sock.accept()
-		# start_proxy(connection, client_address)
 
 		read_socks, _, error_socks = select.select(input_socks, [], input_socks)
 
@@ -181,7 +137,6 @@ if __name__ == "__main__":
 				client_socks.append(new_client)
 				num_clients += 1
 				num_inputs += 1
-				# print("Established connection with new client")
 
 			elif s in client_socks:
 				# HTTP request came in from client
@@ -203,6 +158,7 @@ if __name__ == "__main__":
 					continue
 				
 				new_req, webserver, url = http_req_fixer_v2(data)
+
 				# check if url is in cache
 				reply = read_from_cache(url)
 				if reply != b"":
@@ -243,19 +199,21 @@ if __name__ == "__main__":
 						time_stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
 						fresh_msg = f"FRESH VERSION AT: {time_stamp}"
 						cache_msg = f"CACHED VERSION AS OF: {time_stamp}"
+
 						client_sock.sendall(inject_html(fresh_msg, dest_response_dict[s]))
 						write_to_cache(inject_html(cache_msg, dest_response_dict[s]), url)
+
 					except OSError as e:
 						print("Tried writing to a client that already disconnected")
+
 					finally:
 						input_socks.remove(s)
 						s.close()
 						num_inputs -= 1
 						dest_response_dict.pop(s)
 						dest_client_dict.pop(s)
-					continue
-					
 
+					continue
 				
 				dest_response_dict[s] += reply
 	
@@ -264,5 +222,10 @@ if __name__ == "__main__":
 				e.shutdown()
 			except ConnectionResetError:
 				continue
+
+
+if __name__ == "__main__":
+	# parse cache expiry timer
+	cache_timer = int(sys.argv[1])
+	start_proxy(cache_timer)
 	
-	print(str(num_clients)+" unique clients, "+str(num_inputs)+" total sockets.", end='\r')
